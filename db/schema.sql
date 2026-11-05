@@ -164,3 +164,10 @@ CREATE TABLE IF NOT EXISTS market.holdings (
     note        TEXT,
     updated_at  TIMESTAMPTZ DEFAULT now()
 );
+
+-- Stocks you never want the model to buy (e.g. personal conviction, ethics, already-researched no's)
+CREATE TABLE IF NOT EXISTS market.exclusions (
+    symbol     TEXT PRIMARY KEY,
+    reason     TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);

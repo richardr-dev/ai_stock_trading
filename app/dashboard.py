@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -46,9 +47,11 @@ c[3].metric("BI rate", f"{reg['ID']['bi_rate']:.2f}%")
 c[4].metric("S&P trend", "▲ above 200d" if bench.get("US") else "▼ below 200d")
 c[5].metric("JCI trend", "▲ above 200d" if bench.get("ID") else "▼ below 200d")
 
-tabs = st.tabs(["💼 My Holdings", "📋 Portfolio", "📈 Signals", "💰 DCF", "🔍 Ticker", "🧪 Backtest", "🤖 Ask JARVIS", "🗒️ Briefs"])
+TAB_NAMES = ["💼 My Holdings", "🌐 All Stocks", "🏦 Rates & Value", "📋 Model Book", "💰 DCF", "🔍 Ticker",
+             "🧪 Backtest", "🤖 Ask JARVIS", "🗒️ Briefs"]
+T = dict(zip(TAB_NAMES, st.tabs(TAB_NAMES)))
 
-with tabs[0]:
+with T["💼 My Holdings"]:
     from jarvis.config import all_tickers
     from jarvis.holdings import current_book, remove_holding, review, set_holding, usdidr
 
@@ -116,6 +119,10 @@ with tabs[0]:
             amt = f"Rp{c.amount_usd * fx:,.0f}" if mk == "ID" else f"${c.amount_usd:,.0f}"
             st.caption(f"💵 Model keeps **{amt}** in cash ({mk}) — {c.reason}")
 
+    if not book.empty:
+        from app_views import breakeven_view
+        breakeven_view(book)
+
     with st.expander("✏️ Add / edit / remove a position", expanded=book.empty):
         universe = sorted(s for lst in all_tickers().values() for s in lst)
         with st.form("holding_form"):
@@ -144,7 +151,7 @@ with tabs[0]:
         st.caption("The ticker list is the stock universe. To track a new stock, add it to config/settings.yaml "
                    "and run `python -m jarvis run`. Saving here re-computes the model's targets instantly.")
 
-with tabs[1]:
+with T["📋 Model Book"]:
     if port.empty:
         st.info("No portfolio yet — run `python -m jarvis run`.")
     else:
@@ -159,26 +166,22 @@ with tabs[1]:
             "target_price": st.column_config.NumberColumn("Target", format="%.2f"),
         })
 
-with tabs[2]:
-    for mkt in ("US", "ID"):
-        s = sig[sig["market"] == mkt][["rank_in_market", "symbol", "name", "price", "ret_1m", "ret_3m",
-                                       "mom_12_1", "pct_of_52w_high", "above_200d", "dcf_upside",
-                                       "vol_ann", "composite"]]
-        st.subheader("🇺🇸 US" if mkt == "US" else "🇮🇩 Indonesia")
-        st.dataframe(s, hide_index=True, width="stretch", column_config={
-            k: st.column_config.NumberColumn(format="percent") for k in
-            ("ret_1m", "ret_3m", "mom_12_1", "pct_of_52w_high", "vol_ann")} | {
-            "dcf_upside": st.column_config.NumberColumn("DCF upside %", format="%.0f"),
-            "composite": st.column_config.NumberColumn(format="%.2f")})
+with T["🌐 All Stocks"]:
+    from app_views import all_stocks_view
+    all_stocks_view(sig, port, _rebuild)
 
-with tabs[3]:
+with T["🏦 Rates & Value"]:
+    from app_views import rates_value_view
+    rates_value_view()
+
+with T["💰 DCF"]:
     st.caption("rate_sens_pct = % change in intrinsic value if the risk-free rate rises 1 point. "
                "More negative = longer-duration stock = more hurt by rising yields.")
     st.dataframe(dcf[["symbol", "name", "market", "method", "price", "intrinsic_value", "upside_pct",
                       "wacc_pct", "growth_pct", "terminal_g_pct", "rf_pct", "rate_sens_pct"]]
                  .sort_values("upside_pct", ascending=False), hide_index=True, width="stretch")
 
-with tabs[4]:
+with T["🔍 Ticker"]:
     syms = sig["symbol"].tolist()
     sym = st.selectbox("Ticker", syms, index=0 if syms else None)
     if sym:
@@ -197,7 +200,7 @@ with tabs[4]:
             ["method", "intrinsic_value", "upside_pct", "wacc_pct", "growth_pct", "rate_sens_pct"]].to_dict()
             if (dcf.symbol == sym).any() else None})
 
-with tabs[5]:
+with T["🧪 Backtest"]:
     months = st.radio("Rebalance every", [1, 2, 3], horizontal=True, format_func=lambda m: f"{m} month(s)")
     if st.button("Run backtest"):
         from jarvis.backtest import backtest_market
@@ -214,7 +217,7 @@ with tabs[5]:
                 st.dataframe(res["log"], hide_index=True, width="stretch")
         st.caption("Price factors only; survivorship-biased universe → real results would be lower.")
 
-with tabs[6]:
+with T["🤖 Ask JARVIS"]:
     up = llm.available()
     st.caption(f"Local model: {llm.settings()['llm']['model']} — {'🟢 online' if up else '🔴 offline (run ollama serve)'}")
     if "chat" not in st.session_state:
@@ -231,7 +234,7 @@ with tabs[6]:
         with st.spinner("Writing brief…"):
             st.markdown(llm.weekly_brief())
 
-with tabs[7]:
+with T["🗒️ Briefs"]:
     b = q("SELECT created_at, kind, model, prompt, content FROM market.ai_briefs ORDER BY created_at DESC LIMIT 30")
     for _, r in b.iterrows():
         with st.expander(f"{r.created_at:%Y-%m-%d %H:%M} · {r.kind} · {r.prompt[:80]}"):

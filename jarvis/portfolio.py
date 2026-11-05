@@ -79,6 +79,7 @@ def build_portfolio(run_date: date | None = None) -> pd.DataFrame:
                              AND action <> 'SELL' AND weight > 0 AND symbol NOT LIKE 'CASH_%'""",
                         d=run_date).set_index("symbol")["weight"]
     bench_ok = benchmark_trend(run_date)
+    excluded = set(db.query("SELECT symbol FROM market.exclusions")["symbol"])
     recs = []
 
     for mkt, alloc in allocation.items():
@@ -90,6 +91,7 @@ def build_portfolio(run_date: date | None = None) -> pd.DataFrame:
         n_total, top_n = len(g), cfg["top_n"][mkt]
         exit_rank = int(np.ceil(top_n * cfg["exit_rank_multiplier"]))
         eligible = g["above_200d"] if cfg["require_trend"] else pd.Series(True, index=g.index)
+        eligible = eligible & ~g.index.isin(excluded)
 
         keep = [s for s in prev.index if s in g.index and g.loc[s, "rank_in_market"] <= exit_rank and eligible[s]]
         chosen = list(keep)
@@ -127,7 +129,7 @@ def build_portfolio(run_date: date | None = None) -> pd.DataFrame:
         for s in prev.index:
             if s in g.index and s not in chosen and not any(r["symbol"] == s for r in recs):
                 r = g.loc[s]
-                why = ("broke 200-day trend" if not eligible[s]
+                why = ("you excluded it" if s in excluded else "broke 200-day trend" if not eligible[s]
                        else f"rank fell to {int(r.rank_in_market)} (> exit rank {exit_rank})")
                 recs.append({"run_date": run_date, "symbol": s, "market": mkt, "action": "SELL",
                              "weight": 0.0, "amount_usd": 0.0, "price": r["price"], "stop_price": None,
