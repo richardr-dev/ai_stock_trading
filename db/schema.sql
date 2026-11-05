@@ -150,6 +150,29 @@ CREATE TABLE IF NOT EXISTS market.forecasts (
     PRIMARY KEY (symbol, run_date)
 );
 
+
+-- Swing trading (see jarvis/swing.py)
+CREATE TABLE IF NOT EXISTS market.swing_stats (
+    setup TEXT, market TEXT, run_date DATE, trades INTEGER, trades_per_year DOUBLE PRECISION,
+    win_rate DOUBLE PRECISION, avg_win DOUBLE PRECISION, avg_loss DOUBLE PRECISION, avg_ret DOUBLE PRECISION,
+    expectancy_r DOUBLE PRECISION, profit_factor DOUBLE PRECISION, avg_days DOUBLE PRECISION,
+    worst DOUBLE PRECISION, best DOUBLE PRECISION, recent_1y_avg_ret DOUBLE PRECISION,
+    PRIMARY KEY (setup, market)
+);
+CREATE TABLE IF NOT EXISTS market.swing_trades (
+    symbol TEXT, market TEXT, setup TEXT, entry_date DATE, exit_date DATE, entry DOUBLE PRECISION,
+    exit DOUBLE PRECISION, stop DOUBLE PRECISION, days INTEGER, ret DOUBLE PRECISION, r DOUBLE PRECISION,
+    reason TEXT, PRIMARY KEY (symbol, setup, entry_date)
+);
+CREATE TABLE IF NOT EXISTS market.swing_signals (
+    run_date DATE, signal_date DATE, symbol TEXT, market TEXT, setup TEXT, close DOUBLE PRECISION,
+    stop DOUBLE PRECISION, target DOUBLE PRECISION, max_days INTEGER, atr_pct DOUBLE PRECISION,
+    rsi2 DOUBLE PRECISION, rsi14 DOUBLE PRECISION, shares DOUBLE PRECISION, position_local DOUBLE PRECISION,
+    risk_local DOUBLE PRECISION, hist_trades INTEGER, hist_win_rate DOUBLE PRECISION,
+    hist_expectancy_r DOUBLE PRECISION, hist_avg_days DOUBLE PRECISION, global_rank INTEGER, tradeable BOOLEAN,
+    PRIMARY KEY (run_date, symbol, setup)
+);
+
 -- Cross-market ranking (added later; ALTER keeps existing databases in sync)
 ALTER TABLE market.signals ADD COLUMN IF NOT EXISTS global_score DOUBLE PRECISION;
 ALTER TABLE market.signals ADD COLUMN IF NOT EXISTS global_rank INTEGER;

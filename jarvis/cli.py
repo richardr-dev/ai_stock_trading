@@ -146,6 +146,35 @@ def _show_forecast(n: int = 30, uptrend_only: bool = True):
                   "upside with less risk. Survivorship bias applies; treat as ranking, not promise.[/]")
 
 
+def _show_swing(signals: pd.DataFrame, show_all: bool = False):
+    stats = db.query("SELECT * FROM market.swing_stats ORDER BY expectancy_r DESC")
+    t = Table(title="Swing setups — historical results (net of costs; only ✓ setups produce live trades)")
+    for c in ("Setup", "Mkt", "Trades", "Win %", "Avg win", "Avg loss", "Expectancy (R)", "Profit factor", "Avg days", "Live"):
+        t.add_column(c, justify="right")
+    for _, r in stats.iterrows():
+        ok = r.trades >= 30 and r.expectancy_r >= 0.05
+        t.add_row(r.setup, r.market, f"{r.trades:,}", f"{r.win_rate:.0%}", f"{r.avg_win:+.1%}", f"{r.avg_loss:+.1%}",
+                  f"{r.expectancy_r:+.2f}", f"{r.profit_factor:.2f}", f"{r.avg_days:.1f}", "✓" if ok else "✗")
+    console.print(t)
+    sig = signals if show_all else signals[signals["tradeable"]] if not signals.empty else signals
+    if sig.empty:
+        console.print("[yellow]No tradeable swing signals on the latest close.[/]")
+        return
+    t = Table(title=f"Swing signals from close of {sig['signal_date'].max()} → orders for next open")
+    for c in ("Setup", "Symbol", "Close", "Stop", "Target", "Shares", "Position", "Risk", "Win%", "Exp R", "Days", "Rank", "Live"):
+        t.add_column(c, justify="right")
+    for _, r in sig.iterrows():
+        m = lambda x: "" if x is None or pd.isna(x) else (f"Rp{x:,.0f}" if r.market == "ID" else f"${x:,.2f}")
+        t.add_row(r.setup, r.symbol, m(r.close), m(r.stop), m(r.target), f"{r.shares:,.0f}", m(r.position_local),
+                  m(r.risk_local), "" if pd.isna(r.hist_win_rate) else f"{r.hist_win_rate:.0%}",
+                  "" if pd.isna(r.hist_expectancy_r) else f"{r.hist_expectancy_r:+.2f}",
+                  str(r.max_days), "" if pd.isna(r.global_rank) else str(int(r.global_rank)),
+                  "✓" if r.tradeable else "✗")
+    console.print(t)
+    console.print("[dim]Risk = loss if the stop is hit (sized to 1% of your capital). Enter at next open; "
+                  "if it gaps above close by >1×ATR, skip. Max days = time stop.[/]")
+
+
 def cmd_analyze(_):
     from .dcf import run_dcf
     from .factors import run_signals, rate_regime
@@ -158,6 +187,10 @@ def cmd_analyze(_):
     from .forecast import run_forecast
     with console.status("Forecasting 3-month potential vs risk…"):
         run_forecast()
+    from .swing import run_backtest, scan
+    with console.status("Backtesting + scanning swing setups…"):
+        run_backtest()
+        scan()
     build_portfolio()
     console.print(f"Rate regime: {rate_regime()}")
     _show_signals()
@@ -213,6 +246,11 @@ def main(argv=None):
     fc = sub.add_parser("forecast", help="highest potential with lowest risk (3-month view)")
     fc.add_argument("-n", type=int, default=30)
     fc.add_argument("--all", action="store_true", help="include stocks in a downtrend")
+    sw = sub.add_parser("swing", help="daily/weekly swing-trade scan")
+    sw.add_argument("--backtest", action="store_true", help="re-run the setup backtests first")
+    sw.add_argument("--all", action="store_true", help="also show signals from non-tradeable setups")
+    dl = sub.add_parser("daily", help="fast daily routine: refresh prices + swing scan")
+    dl.add_argument("--all", action="store_true")
     tp = sub.add_parser("top", help="best-ranked stocks across both markets")
     tp.add_argument("-n", type=int, default=100)
     tp.add_argument("--market", choices=["US", "ID", "us", "id"])
@@ -245,6 +283,20 @@ def main(argv=None):
         _show_review()
     elif a.cmd == "forecast":
         _show_forecast(a.n, not a.all)
+    elif a.cmd in ("swing", "daily"):
+        from .swing import run_backtest, scan
+        if a.cmd == "daily":
+            from .config import all_tickers, benchmarks
+            from .ingest import ingest_prices, ingest_rates
+            with console.status("Refreshing prices…"):
+                ingest_rates()
+                ingest_prices([s for l in all_tickers().values() for s in l] + list(benchmarks().values()))
+        if getattr(a, "backtest", False):
+            with console.status("Backtesting swing setups…"):
+                run_backtest()
+        with console.status("Scanning…"):
+            sig = scan()
+        _show_swing(sig, a.all)
     elif a.cmd == "top":
         _show_top(a.n, a.market, a.uptrend)
     elif a.cmd == "show":

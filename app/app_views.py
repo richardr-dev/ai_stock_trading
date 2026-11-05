@@ -313,3 +313,47 @@ def potential_risk_view() -> None:
                                                      for k in ("median", "mean", "p10", "p90", "prob_pos")})
         st.caption("Expected 3m = 60% this historical median + 40% analyst target (3-month slice, capped ±15%). "
                    "Survivorship bias: the universe is today's large caps, so history looks better than reality.")
+
+
+# ── ⚡ Swing ──────────────────────────────────────────────────────────────
+def swing_view() -> None:
+    stats = db.query("SELECT * FROM market.swing_stats ORDER BY expectancy_r DESC")
+    sig = db.query("SELECT * FROM market.swing_signals WHERE run_date = (SELECT max(run_date) FROM market.swing_signals)")
+    if stats.empty:
+        st.info("Run `python -m jarvis swing --backtest` first.")
+        return
+    st.markdown("**Setups — backtested on every stock, net of costs.** Only ✓ setups produce live trades "
+                "(≥30 trades and expectancy ≥ +0.05R).")
+    stats["live"] = (stats.trades >= 30) & (stats.expectancy_r >= 0.05)
+    st.dataframe(stats[["live", "setup", "market", "trades", "trades_per_year", "win_rate", "avg_win", "avg_loss",
+                        "expectancy_r", "profit_factor", "avg_days", "worst", "recent_1y_avg_ret"]],
+                 hide_index=True, width="stretch", column_config={
+                     "live": st.column_config.CheckboxColumn("Live"),
+                     "trades_per_year": st.column_config.NumberColumn("Trades/yr", format="%.0f"),
+                     **{k: st.column_config.NumberColumn(format="percent") for k in
+                        ("win_rate", "avg_win", "avg_loss", "worst", "recent_1y_avg_ret")},
+                     "expectancy_r": st.column_config.NumberColumn("Expectancy (R)", format="%+.2f"),
+                     "profit_factor": st.column_config.NumberColumn("Profit factor", format="%.2f"),
+                     "avg_days": st.column_config.NumberColumn("Avg days", format="%.1f")})
+    if sig.empty:
+        st.info("No swing signals on the latest close.")
+        return
+    show_all = st.toggle("Also show non-tradeable setups", value=False)
+    v = sig if show_all else sig[sig["tradeable"]]
+    st.subheader(f"Signals from close of {sig['signal_date'].max()} → orders for next open")
+    v = v.assign(px=[f"Rp{x:,.0f}" if m == "ID" else f"${x:,.2f}" for x, m in zip(v.close, v.market)],
+                 stop_=[f"Rp{x:,.0f}" if m == "ID" else f"${x:,.2f}" for x, m in zip(v.stop, v.market)],
+                 risk=[f"Rp{x:,.0f}" if m == "ID" else f"${x:,.0f}" for x, m in zip(v.risk_local, v.market)],
+                 pos=[f"Rp{x:,.0f}" if m == "ID" else f"${x:,.0f}" for x, m in zip(v.position_local, v.market)])
+    st.dataframe(v[["tradeable", "setup", "symbol", "px", "stop_", "target", "shares", "pos", "risk",
+                    "hist_win_rate", "hist_expectancy_r", "max_days", "global_rank"]], hide_index=True, width="stretch",
+                 column_config={"tradeable": st.column_config.CheckboxColumn("Live"), "px": "Close",
+                                "stop_": "Stop", "pos": "Position", "risk": "Risk if stopped",
+                                "shares": st.column_config.NumberColumn(format="%,.0f"),
+                                "target": st.column_config.NumberColumn(format="%,.2f"),
+                                "hist_win_rate": st.column_config.NumberColumn("Win %", format="percent"),
+                                "hist_expectancy_r": st.column_config.NumberColumn("Exp R", format="%+.2f"),
+                                "max_days": "Max days", "global_rank": "🏆 Rank"})
+    st.caption("Rules: enter at next open (skip if it gaps up > 1×ATR); exit on the setup's exit rule, the stop, or "
+               "the time limit. Risk per trade = 1% of capital; keep ≤ 6 open trades. Prefer signals with a good "
+               "🏆 rank — they agree with the monthly model.")

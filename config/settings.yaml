@@ -94,6 +94,12 @@ portfolio:
   defensive_if_benchmark_below_200d: 0.5   # scale exposure when market is in a downtrend
   stop_atr_multiple: 2.5
 
+swing:
+  risk_per_trade: 0.01        # risk 1% of capital per swing trade (entry → stop)
+  max_open_trades: 6          # total "heat" ≈ 6% if every stop hits at once
+  min_trades_for_stats: 30    # a setup needs ≥30 historical trades in that market…
+  min_expectancy_r: 0.05      # …and positive expectancy (in R) to generate live signals
+
 llm:
   provider: ollama
   host: http://localhost:11434
