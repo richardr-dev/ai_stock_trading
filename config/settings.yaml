@@ -1,0 +1,82 @@
+# ─────────────────────────────────────────────────────────────
+#  J.A.R.V.I.S. Fund — configuration
+#  Edit freely. Every run reads this file.
+# ─────────────────────────────────────────────────────────────
+
+universe:
+  US:
+    benchmark: SPY
+    tickers: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, AVGO, AMD, TSM,
+              UBER, NFLX, CRM, ORCL, ADBE, NOW, PLTR, SHOP, ASML, MU,
+              COST, WMT, JPM, V, MA, GS, LLY, UNH, ABBV, ISRG,
+              CAT, GE, XOM, ANET, PANW, CRWD, INTU, BKNG, SPOT, QCOM]
+  ID:
+    benchmark: ^JKSE
+    tickers: [BBCA.JK, BBRI.JK, BMRI.JK, BBNI.JK, TLKM.JK, ASII.JK, UNVR.JK,
+              ICBP.JK, INDF.JK, ADRO.JK, ANTM.JK, MDKA.JK, GOTO.JK, AMMN.JK,
+              CPIN.JK, KLBF.JK, PGAS.JK, PTBA.JK, ITMG.JK, UNTR.JK, SMGR.JK,
+              INCO.JK, AMRT.JK, MEDC.JK, EXCL.JK, ISAT.JK, JPFA.JK, ACES.JK,
+              BRIS.JK, MAPI.JK]
+
+# Interest-rate / macro series
+rates:
+  yfinance:            # live market yields (percent)
+    US_13W: ^IRX
+    US_5Y:  ^FVX
+    US_10Y: ^TNX
+    US_30Y: ^TYX
+    USDIDR: IDR=X
+  fred:                # free CSV download, no API key needed
+    - DGS10            # US 10Y Treasury
+    - DGS2             # US 2Y Treasury
+    - DFF              # Effective Fed Funds rate
+    - T10Y2Y           # US curve slope
+    - IR3TIB01IDM156N  # Indonesia 3M interbank (OECD, monthly, lags ~10 months)
+  # Fallbacks used when a live source is missing/stale. UPDATE these when BI / Fed move.
+  manual:
+    BI_RATE: 5.75      # Bank Indonesia policy rate (%) — held 21-Oct-2026; check bi.go.id after each RDG
+    ID_10Y: 7.65       # Indonesia 10Y SBN yield (%) — ~7.5-7.75 late Oct/early Nov 2026 (4y high)
+
+dcf:
+  projection_years: 10       # years 1-5 at stage-1 growth, then linear fade to terminal
+  equity_risk_premium:
+    US: 4.5
+    ID: 6.5                  # mature ERP + Indonesia country risk premium
+  terminal_growth:
+    US: 2.5
+    ID: 4.0                  # nominal IDR growth
+  tax_rate: {US: 21.0, ID: 22.0}
+  debt_spread: 1.5           # cost of debt = rf + spread
+  growth_clip: [-5.0, 20.0]  # stage-1 growth bounds (%)
+  growth_shrink: 0.4         # pull raw growth 40% toward terminal growth (YoY growth is noisy)
+  cyclical_sectors: [Energy, Basic Materials]   # normalised FCF (multi-year avg), no extra growth
+  cyclical_max_growth: 3.0
+  beta_clip: [0.6, 2.0]
+
+# Multi-factor score weights (sum to 1.0). Horizon: ~2-3 months, monthly rebalance.
+factor_weights:
+  mom_12_1: 0.15      # 12-month return skipping last month (classic momentum)
+  mom_6m: 0.12
+  mom_3m_risk_adj: 0.08
+  high_52w: 0.10      # closeness to 52-week high (George & Hwang)
+  trend: 0.10         # price vs 50/200-day averages
+  dcf_value: 0.18     # DCF upside (capped)
+  quality: 0.12       # ROE, margins, leverage
+  revisions: 0.10     # forward vs trailing EPS + analyst target upside
+  low_vol: 0.05
+
+portfolio:
+  capital_usd: 100000
+  market_allocation: {US: 0.70, ID: 0.30}
+  top_n: {US: 6, ID: 4}
+  exit_rank_multiplier: 2.0   # keep a holding until it falls below rank top_n*2 (cuts churn)
+  max_weight: 0.25            # per position, within each market sleeve
+  require_trend: true         # only buy names above their 200-day average
+  defensive_if_benchmark_below_200d: 0.5   # scale exposure when market is in a downtrend
+  stop_atr_multiple: 2.5
+
+llm:
+  provider: ollama
+  host: http://localhost:11434
+  model: qwen2.5:7b
+  temperature: 0.3
