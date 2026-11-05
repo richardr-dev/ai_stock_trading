@@ -38,9 +38,24 @@ c[3].metric("BI rate", f"{reg['ID']['bi_rate']:.2f}%")
 c[4].metric("S&P trend", "▲ above 200d" if bench.get("US") else "▼ below 200d")
 c[5].metric("JCI trend", "▲ above 200d" if bench.get("ID") else "▼ below 200d")
 
-tabs = st.tabs(["📋 Portfolio", "📈 Signals", "💰 DCF", "🔍 Ticker", "🧪 Backtest", "🤖 Ask JARVIS", "🗒️ Briefs"])
+tabs = st.tabs(["💼 My Holdings", "📋 Portfolio", "📈 Signals", "💰 DCF", "🔍 Ticker", "🧪 Backtest", "🤖 Ask JARVIS", "🗒️ Briefs"])
 
 with tabs[0]:
+    from jarvis.holdings import current_book, review
+    book = current_book()
+    if book.empty:
+        st.info("No holdings yet: `python -m jarvis holdings set BBCA.JK --value 580000000`")
+    else:
+        st.metric("Total (USD)", f"${book.value_usd.sum():,.0f}")
+        st.dataframe(book[["symbol", "shares", "price", "value_local", "value_usd", "weight"]], hide_index=True,
+                     width="stretch", column_config={"weight": st.column_config.ProgressColumn(
+                         "Weight", format="percent", min_value=0, max_value=1),
+                         "value_usd": st.column_config.NumberColumn("≈ USD", format="$%,.0f"),
+                         "value_local": st.column_config.NumberColumn("Value (local)", format="%,.0f")})
+        st.subheader("Model review")
+        st.dataframe(review(), hide_index=True, width="stretch")
+
+with tabs[1]:
     if port.empty:
         st.info("No portfolio yet — run `python -m jarvis run`.")
     else:
@@ -55,7 +70,7 @@ with tabs[0]:
             "target_price": st.column_config.NumberColumn("Target", format="%.2f"),
         })
 
-with tabs[1]:
+with tabs[2]:
     for mkt in ("US", "ID"):
         s = sig[sig["market"] == mkt][["rank_in_market", "symbol", "name", "price", "ret_1m", "ret_3m",
                                        "mom_12_1", "pct_of_52w_high", "above_200d", "dcf_upside",
@@ -67,14 +82,14 @@ with tabs[1]:
             "dcf_upside": st.column_config.NumberColumn("DCF upside %", format="%.0f"),
             "composite": st.column_config.NumberColumn(format="%.2f")})
 
-with tabs[2]:
+with tabs[3]:
     st.caption("rate_sens_pct = % change in intrinsic value if the risk-free rate rises 1 point. "
                "More negative = longer-duration stock = more hurt by rising yields.")
     st.dataframe(dcf[["symbol", "name", "market", "method", "price", "intrinsic_value", "upside_pct",
                       "wacc_pct", "growth_pct", "terminal_g_pct", "rf_pct", "rate_sens_pct"]]
                  .sort_values("upside_pct", ascending=False), hide_index=True, width="stretch")
 
-with tabs[3]:
+with tabs[4]:
     syms = sig["symbol"].tolist()
     sym = st.selectbox("Ticker", syms, index=0 if syms else None)
     if sym:
@@ -93,7 +108,7 @@ with tabs[3]:
             ["method", "intrinsic_value", "upside_pct", "wacc_pct", "growth_pct", "rate_sens_pct"]].to_dict()
             if (dcf.symbol == sym).any() else None})
 
-with tabs[4]:
+with tabs[5]:
     months = st.radio("Rebalance every", [1, 2, 3], horizontal=True, format_func=lambda m: f"{m} month(s)")
     if st.button("Run backtest"):
         from jarvis.backtest import backtest_market
@@ -110,7 +125,7 @@ with tabs[4]:
                 st.dataframe(res["log"], hide_index=True, width="stretch")
         st.caption("Price factors only; survivorship-biased universe → real results would be lower.")
 
-with tabs[5]:
+with tabs[6]:
     up = llm.available()
     st.caption(f"Local model: {llm.settings()['llm']['model']} — {'🟢 online' if up else '🔴 offline (run ollama serve)'}")
     if "chat" not in st.session_state:
@@ -127,7 +142,7 @@ with tabs[5]:
         with st.spinner("Writing brief…"):
             st.markdown(llm.weekly_brief())
 
-with tabs[6]:
+with tabs[7]:
     b = q("SELECT created_at, kind, model, prompt, content FROM market.ai_briefs ORDER BY created_at DESC LIMIT 30")
     for _, r in b.iterrows():
         with st.expander(f"{r.created_at:%Y-%m-%d %H:%M} · {r.kind} · {r.prompt[:80]}"):

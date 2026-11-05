@@ -53,6 +53,51 @@ def _show_signals(n: int = 10):
         console.print(t)
 
 
+def _money(x, mkt):
+    if x is None or pd.isna(x):
+        return ""
+    return f"Rp{x:,.0f}" if mkt == "ID" else f"${x:,.0f}"
+
+
+def _show_holdings():
+    from .holdings import current_book, usdidr
+    b = current_book()
+    if b.empty:
+        console.print("No holdings recorded. Add with: python -m jarvis holdings set BBCA.JK --value 580000000")
+        return
+    t = Table(title=f"Your portfolio — total ${b.value_usd.sum():,.0f}  (USD/IDR {usdidr():,.0f})")
+    for c in ("Symbol", "Shares", "Price", "Value", "≈ USD", "Weight"):
+        t.add_column(c, justify="right")
+    for _, r in b.iterrows():
+        t.add_row(r.symbol, f"{r.shares:,.0f}", _money(r.price, r.market) if r.market == "ID" else f"${r.price:,.2f}",
+                  _money(r.value_local, r.market), f"${r.value_usd:,.0f}", f"{r.weight:.1%}")
+    console.print(t)
+
+
+def _show_review():
+    from .holdings import review, usdidr
+    rv = review()
+    port = db.query("SELECT * FROM market.v_latest_portfolio WHERE symbol LIKE 'CASH%'")
+    t = Table(title="J.A.R.V.I.S. review — your holdings vs the model book")
+    for c in ("Verdict", "Symbol", "Rank", "Trend", "3m", "12-1m", "DCF", "Now", "Target", "Trade", "Units", "Stop", "Why"):
+        t.add_column(c, overflow="fold")
+    colors = {"BUY": "green", "ADD": "green", "HOLD": "cyan", "TRIM": "yellow", "SELL": "red"}
+    pc = lambda x: "" if x is None or pd.isna(x) else f"{x:+.0%}"
+    for _, r in rv.iterrows():
+        t.add_row(f"[{colors[r.verdict]}]{r.verdict}[/]", r.symbol, r["rank"],
+                  "✓" if r.trend_ok else "✗", pc(r.ret_3m), pc(r.mom_12_1),
+                  "" if r.dcf_upside is None or pd.isna(r.dcf_upside) else f"{r.dcf_upside:+.0f}%",
+                  _money(r.current_local, r.market), _money(r.target_local, r.market),
+                  ("+" if r.trade_local > 0 else "") + _money(r.trade_local, r.market),
+                  f"{r.trade_units:+,.0f}", _money(r.stop, r.market) if r.market == "ID" else
+                  ("" if r.stop is None or pd.isna(r.stop) else f"${r.stop:,.2f}"), r.reason)
+    console.print(t)
+    fx = usdidr()
+    for _, c in port.iterrows():
+        m = c.symbol.split("_")[1]
+        console.print(f"[dim]{c.symbol}: keep {_money(c.amount_usd * (fx if m == 'ID' else 1), m)} in cash — {c.reason}[/]")
+
+
 def cmd_analyze(_):
     from .dcf import run_dcf
     from .factors import run_signals, rate_regime
@@ -66,6 +111,10 @@ def cmd_analyze(_):
     console.print(f"Rate regime: {rate_regime()}")
     _show_signals()
     _show_portfolio()
+    from .holdings import current_book
+    if not current_book().empty:
+        _show_holdings()
+        _show_review()
 
 
 def cmd_backtest(a):
@@ -99,6 +148,17 @@ def main(argv=None):
     sub.add_parser("chat")
     bt = sub.add_parser("backtest")
     bt.add_argument("--months", type=int, default=1, help="rebalance interval in months")
+    hd = sub.add_parser("holdings", help="record / list your real positions")
+    hsub = hd.add_subparsers(dest="hcmd")
+    hs = hsub.add_parser("set", help="set a position by --shares or --value (local currency)")
+    hs.add_argument("symbol")
+    hs.add_argument("--shares", type=float)
+    hs.add_argument("--value", type=float, help="current market value in IDR for .JK, USD for US")
+    hs.add_argument("--cost", type=float, help="average cost per share (optional)")
+    hr = hsub.add_parser("rm")
+    hr.add_argument("symbol")
+    hsub.add_parser("list")
+    sub.add_parser("review", help="compare your holdings with the model book")
     rn = sub.add_parser("run")
     rn.add_argument("--no-brief", action="store_true")
     a = p.parse_args(argv)
@@ -112,6 +172,19 @@ def main(argv=None):
             console.print(ingest_all(skip_fundamentals=a.prices_only))
     elif a.cmd == "analyze":
         cmd_analyze(a)
+    elif a.cmd == "holdings":
+        from .holdings import remove_holding, set_holding
+        if a.hcmd == "set":
+            r = set_holding(a.symbol.upper(), shares=a.shares, value=a.value, cost_basis=a.cost)
+            console.print(f"Recorded {r['symbol']}: {r['shares']:,.0f} shares")
+        elif a.hcmd == "rm":
+            remove_holding(a.symbol.upper())
+        _show_holdings()
+    elif a.cmd == "review":
+        from .portfolio import build_portfolio
+        build_portfolio(pd.Timestamp(db.query("SELECT max(run_date) d FROM market.signals")["d"].iloc[0]).date())
+        _show_holdings()
+        _show_review()
     elif a.cmd == "show":
         _show_signals()
         _show_portfolio()

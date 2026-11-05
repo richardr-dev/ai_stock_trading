@@ -154,3 +154,13 @@ CREATE OR REPLACE VIEW market.v_latest_rates AS
 SELECT DISTINCT ON (series_id) series_id, date, value, source
 FROM market.macro_rates
 ORDER BY series_id, date DESC;
+
+-- Your real positions. shares = source of truth; value is re-computed from latest price.
+CREATE TABLE IF NOT EXISTS market.holdings (
+    symbol      TEXT PRIMARY KEY,
+    shares      DOUBLE PRECISION NOT NULL,
+    currency    TEXT,
+    cost_basis  DOUBLE PRECISION,        -- optional, per share, local currency
+    note        TEXT,
+    updated_at  TIMESTAMPTZ DEFAULT now()
+);

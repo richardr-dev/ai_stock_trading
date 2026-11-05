@@ -16,7 +16,7 @@ universe:
               ICBP.JK, INDF.JK, ADRO.JK, ANTM.JK, MDKA.JK, GOTO.JK, AMMN.JK,
               CPIN.JK, KLBF.JK, PGAS.JK, PTBA.JK, ITMG.JK, UNTR.JK, SMGR.JK,
               INCO.JK, AMRT.JK, MEDC.JK, EXCL.JK, ISAT.JK, JPFA.JK, ACES.JK,
-              BRIS.JK, MAPI.JK]
+              BRIS.JK, MAPI.JK, NCKL.JK]
 
 # Interest-rate / macro series
 rates:
@@ -66,8 +66,11 @@ factor_weights:
   low_vol: 0.05
 
 portfolio:
-  capital_usd: 100000
+  capital_usd: 100000           # used only when no holdings are recorded
   market_allocation: {US: 0.70, ID: 0.30}
+  # current = keep each market's money where it is (IDR stays in your IDX broker, USD in your US broker)
+  # fixed   = rebalance to market_allocation above (requires moving money between brokers)
+  market_allocation_mode: current
   top_n: {US: 6, ID: 4}
   exit_rank_multiplier: 2.0   # keep a holding until it falls below rank top_n*2 (cuts churn)
   max_weight: 0.25            # per position, within each market sleeve

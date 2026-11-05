@@ -91,6 +91,18 @@ def build_context(top: int = 12) -> str:
     parts.append("\nDCF DETAIL FOR PORTFOLIO NAMES (rate_sens = % value change for +1pt risk-free):\n"
                  + _fmt(held, ["symbol", "method", "price", "intrinsic_value", "upside_pct", "wacc_pct",
                                "growth_pct", "rate_sens_pct"]))
+    try:
+        from .holdings import current_book, review
+        book = current_book()
+        if not book.empty:
+            parts.append(f"\nUSER'S ACTUAL HOLDINGS (total ${book.value_usd.sum():,.0f}):\n" + _fmt(
+                book, ["symbol", "shares", "price", "value_local", "value_usd", "weight"]))
+            parts.append("\nREVIEW: USER HOLDINGS vs MODEL TARGET (local currency; IDX trades in lots of 100):\n"
+                         + _fmt(review(), ["verdict", "symbol", "rank", "trend_ok", "ret_3m", "mom_12_1",
+                                           "current_local", "target_local", "trade_local", "trade_units",
+                                           "stop", "reason"]))
+    except Exception:
+        pass
     return "\n".join(parts)
 
 

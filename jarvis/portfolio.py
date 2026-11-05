@@ -62,14 +62,28 @@ def build_portfolio(run_date: date | None = None) -> pd.DataFrame:
                     "ORDER BY symbol, as_of DESC").set_index("symbol")
     dcf = db.query("SELECT DISTINCT ON (symbol) symbol, intrinsic_value FROM market.dcf_valuations "
                    "ORDER BY symbol, run_date DESC").set_index("symbol")
-    prev = db.query("""SELECT symbol, weight FROM market.recommendations
-                       WHERE run_date = (SELECT max(run_date) FROM market.recommendations WHERE run_date < :d)
-                         AND action <> 'SELL' AND weight > 0""", d=run_date).set_index("symbol")["weight"]
+    from .holdings import current_book
+    book = current_book()
+    allocation = dict(cfg["market_allocation"])
+    if not book.empty:
+        # Real positions drive everything: capital = what you own, "previous holdings" = what you own.
+        capital = float(book["value_usd"].sum())
+        prev = book.set_index("symbol")["weight"]
+        if cfg.get("market_allocation_mode", "current") == "current":
+            by_mkt = book.groupby("market")["value_usd"].sum() / capital
+            allocation = {m: float(by_mkt.get(m, 0.0)) for m in allocation}
+    else:
+        capital = cfg["capital_usd"]
+        prev = db.query("""SELECT symbol, weight FROM market.recommendations
+                           WHERE run_date = (SELECT max(run_date) FROM market.recommendations WHERE run_date < :d)
+                             AND action <> 'SELL' AND weight > 0 AND symbol NOT LIKE 'CASH_%'""",
+                        d=run_date).set_index("symbol")["weight"]
     bench_ok = benchmark_trend(run_date)
-    capital = cfg["capital_usd"]
     recs = []
 
-    for mkt, alloc in cfg["market_allocation"].items():
+    for mkt, alloc in allocation.items():
+        if alloc <= 0:
+            continue
         g = sig[sig["market"] == mkt].set_index("symbol").sort_values("rank_in_market")
         if g.empty:
             continue
@@ -111,7 +125,7 @@ def build_portfolio(run_date: date | None = None) -> pd.DataFrame:
                          "target_price": tgt, "reason": _reason(r, n_total)})
 
         for s in prev.index:
-            if s in g.index and s not in chosen:
+            if s in g.index and s not in chosen and not any(r["symbol"] == s for r in recs):
                 r = g.loc[s]
                 why = ("broke 200-day trend" if not eligible[s]
                        else f"rank fell to {int(r.rank_in_market)} (> exit rank {exit_rank})")
