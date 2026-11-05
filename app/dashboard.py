@@ -198,6 +198,17 @@ with T["🔍 Ticker"]:
         fig = go.Figure([go.Candlestick(x=o.index, open=o.open, high=o.high, low=o.low, close=o.close, name=sym),
                          go.Scatter(x=o.index, y=o.ma50, name="50d", line=dict(width=1.5)),
                          go.Scatter(x=o.index, y=o.ma200, name="200d", line=dict(width=1.5))])
+        from jarvis.swing import levels as _levels
+        try:
+            L = _levels(sym)
+            for z in L["supports"]:
+                fig.add_hline(y=z["level"], line_color="#27ae60", line_dash="dash", opacity=0.7,
+                              annotation_text=f"support ×{z['touches']}", annotation_position="bottom right")
+            for z in L["resistances"]:
+                fig.add_hline(y=z["level"], line_color="#c0392b", line_dash="dash", opacity=0.7,
+                              annotation_text=f"resistance ×{z['touches']}", annotation_position="top right")
+        except Exception:
+            pass
         rec = port[port["symbol"] == sym]
         if not rec.empty and pd.notna(rec["stop_price"].iloc[0]):
             fig.add_hline(y=rec["stop_price"].iloc[0], line_dash="dot", annotation_text="stop")

@@ -249,6 +249,8 @@ def main(argv=None):
     sw = sub.add_parser("swing", help="daily/weekly swing-trade scan")
     sw.add_argument("--backtest", action="store_true", help="re-run the setup backtests first")
     sw.add_argument("--all", action="store_true", help="also show signals from non-tradeable setups")
+    lv = sub.add_parser("levels", help="support / resistance levels for stocks")
+    lv.add_argument("symbols", nargs="*", help="default: your holdings")
     dl = sub.add_parser("daily", help="fast daily routine: refresh prices + swing scan")
     dl.add_argument("--all", action="store_true")
     tp = sub.add_parser("top", help="best-ranked stocks across both markets")
@@ -283,6 +285,22 @@ def main(argv=None):
         _show_review()
     elif a.cmd == "forecast":
         _show_forecast(a.n, not a.all)
+    elif a.cmd == "levels":
+        from .swing import levels
+        syms = [x.upper() for x in a.symbols] or db.query("SELECT symbol FROM market.holdings")["symbol"].tolist()
+        for sym in syms:
+            L = levels(sym)
+            m = (lambda x: f"Rp{x:,.0f}") if sym.endswith(".JK") else (lambda x: f"${x:,.2f}")
+            t = Table(title=f"{sym} — close {m(L['close'])} · 50d {m(L['sma50'])} · 200d {m(L['sma200'])} "
+                            f"({'rising' if L['sma200_rising'] else 'falling'})")
+            for c in ("Type", "Level", "Distance", "Touches"):
+                t.add_column(c, justify="right")
+            for z in reversed(L["resistances"]):
+                t.add_row("[red]resistance[/]", m(z["level"]), f"{z['distance']:+.1%}", str(z["touches"]))
+            t.add_row("[bold]— price —[/]", m(L["close"]), "", "")
+            for z in L["supports"]:
+                t.add_row("[green]support[/]", m(z["level"]), f"{z['distance']:+.1%}", str(z["touches"]))
+            console.print(t)
     elif a.cmd in ("swing", "daily"):
         from .swing import run_backtest, scan
         if a.cmd == "daily":

@@ -17,6 +17,11 @@ the stop/target price intraday, or at the OPEN if the day gaps through. Costs pe
 US 0.05%; Indonesia 0.15% buy / 0.25% sell (broker + 0.1% final sales tax).
 
 Sizing: risk a fixed % of capital per trade → shares = risk_budget / (entry − stop), IDX rounded to lots.
+  SUPPORT   — buy a defended support level in an uptrend:
+              support = nearest swing-low level tested ≥2× in last 120d (pivots confirmed, no look-ahead)
+              low touches support (±0.25×ATR), closes above it, green day, close in upper half of range,
+              SMA200 rising  →  buy next open; stop = support − 1×ATR; target = nearest resistance (or 2R); 15d max
+  SUPPORT_ANY — same, without the uptrend filter ("it's at support, it must bounce") — kept as a control.
 Only setups with positive historical expectancy in that market produce live signals.
 """
 from __future__ import annotations
@@ -35,7 +40,8 @@ log = logging.getLogger("jarvis.swing")
 
 COST = {"US": (0.0005, 0.0005), "ID": (0.0015, 0.0025)}
 LOT = {"US": 1, "ID": 100}
-SETUPS = ("PULLBACK", "BREAKOUT", "TREND_BOUNCE")
+SETUPS = ("PULLBACK", "BREAKOUT", "TREND_BOUNCE", "SUPPORT", "SUPPORT_ANY")
+CONTROL_SETUPS = {"SUPPORT_ANY"}   # backtested for comparison only; never produces live trades
 
 
 def _cfg() -> dict:
@@ -50,6 +56,47 @@ def _rsi(c: pd.Series, n: int) -> pd.Series:
     up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
     dn = (-d.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
     return 100 - 100 / (1 + up / dn.replace(0, np.nan))
+
+
+PIVOT_K = 5          # a swing low/high needs K lower/higher bars on each side
+SR_LOOKBACK = 120    # use pivots from the last ~6 months
+
+
+def support_resistance(h: np.ndarray, l: np.ndarray, c: np.ndarray, atr: np.ndarray,
+                       min_touches: int = 2) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """For each day t: nearest support below close (tested ≥ min_touches times), its touch count,
+    and nearest resistance above close — using only pivots CONFIRMED by day t."""
+    n, K = len(c), PIVOT_K
+    piv_lo = np.full(n, np.nan)
+    piv_hi = np.full(n, np.nan)
+    for p in range(K, n - K):
+        if l[p] == l[p - K:p + K + 1].min():
+            piv_lo[p] = l[p]
+        if h[p] == h[p - K:p + K + 1].max():
+            piv_hi[p] = h[p]
+    sup = np.full(n, np.nan)
+    touches = np.zeros(n)
+    res = np.full(n, np.nan)
+    for t in range(SR_LOOKBACK, n):
+        lo_win = piv_lo[t - SR_LOOKBACK:t - K + 1]       # pivots confirmed by t (p + K <= t)
+        hi_win = piv_hi[t - SR_LOOKBACK:t - K + 1]
+        lows = lo_win[~np.isnan(lo_win)]
+        highs = hi_win[~np.isnan(hi_win)]
+        a = atr[t]
+        if not np.isfinite(a) or a <= 0:
+            continue
+        # candidate supports: pivot lows between close-3ATR and close+0.25ATR
+        cands = lows[(lows <= c[t] + 0.25 * a) & (lows >= c[t] - 3 * a)]
+        best, best_t = np.nan, 0
+        for lv in np.sort(cands)[::-1]:                 # nearest (highest) first
+            k = int(((np.abs(lows - lv)) <= 0.5 * a).sum())
+            if k >= min_touches:
+                best, best_t = lv, k
+                break
+        sup[t], touches[t] = best, best_t
+        above = highs[highs > c[t] + 0.5 * a]
+        res[t] = above.min() if len(above) else np.nan
+    return sup, touches, res
 
 
 def indicators(o: pd.DataFrame) -> pd.DataFrame:
@@ -70,6 +117,9 @@ def indicators(o: pd.DataFrame) -> pd.DataFrame:
     df["hh20"] = h.rolling(20).max().shift()     # prior 20-day high (excl. today)
     df["vol20"] = df["volume"].rolling(20).mean().shift()
     df["touch_ema"] = ((l - df["ema20"]).abs() <= 0.5 * df["atr"]).rolling(3).max().astype(bool)
+    sup, tch, res = support_resistance(h.to_numpy(), l.to_numpy(), c.to_numpy(), df["atr"].to_numpy())
+    df["support"], df["sup_touches"], df["resistance"] = sup, tch, res
+    df["sma200_rising"] = df["sma200"] > df["sma200"].shift(20)
     return df
 
 
@@ -83,6 +133,15 @@ def entry_mask(df: pd.DataFrame, setup: str) -> pd.Series:
     if setup == "TREND_BOUNCE":
         return ((df["sma50"] > df["sma200"]) & df["touch_ema"] & (c > df["high"].shift()) &
                 df["rsi14"].between(40, 65))
+    if setup in ("SUPPORT", "SUPPORT_ANY"):
+        a, sup, o_ = df["atr"], df["support"], df["open"]
+        rng = (df["high"] - df["low"]).replace(0, np.nan)
+        touched = (df["low"] <= sup + 0.25 * a) & (c > sup)          # tested the level, closed above it
+        rejection = (c > o_) & ((c - df["low"]) / rng >= 0.5)        # green day, close in upper half
+        m = sup.notna() & touched & rejection
+        if setup == "SUPPORT":
+            m &= df["sma200_rising"] & (c > df["sma200"] * 0.97)     # support inside an uptrend
+        return m
     raise ValueError(setup)
 
 
@@ -92,6 +151,13 @@ def stop_and_target(df_row: pd.Series, entry: float, setup: str) -> tuple[float,
         return entry - 2.5 * atr, None, 10
     if setup == "BREAKOUT":
         return entry - 2.0 * atr, None, 20
+    if setup in ("SUPPORT", "SUPPORT_ANY"):
+        stop = float(df_row["support"]) - 1.0 * atr
+        risk = entry - stop
+        res = df_row.get("resistance")
+        target = float(res) if res is not None and np.isfinite(res) and res - entry >= 1.0 * risk \
+            else entry + 2.0 * risk
+        return stop, target, 15
     return entry - 2.0 * atr, entry + 3.0 * atr, 15
 
 
@@ -101,6 +167,8 @@ def _exit_signal(df: pd.DataFrame, i: int, setup: str) -> bool:
         return c > df["sma5"].iat[i]
     if setup == "BREAKOUT":
         return c < df["sma10"].iat[i]
+    if setup in ("SUPPORT", "SUPPORT_ANY"):
+        return False                       # stop / target / time only
     return c < df["ema20"].iat[i] - 0.5 * df["atr"].iat[i]
 
 
@@ -217,7 +285,8 @@ def scan(run_date: date | None = None, capital_usd: float | None = None) -> pd.D
     if stats.empty:
         stats = run_backtest(data)
     good = {(r.setup, r.market): r for r in stats.itertuples()
-            if r.trades >= cfg["min_trades_for_stats"] and r.expectancy_r >= cfg["min_expectancy_r"]}
+            if r.trades >= cfg["min_trades_for_stats"] and r.expectancy_r >= cfg["min_expectancy_r"]
+            and r.setup not in CONTROL_SETUPS}
     from .holdings import current_book, usdidr
     fx = usdidr()
     book = current_book()
@@ -260,3 +329,35 @@ def scan(run_date: date | None = None, capital_usd: float | None = None) -> pd.D
         db.execute("DELETE FROM market.swing_signals WHERE run_date = :d", d=out["run_date"].iloc[0])
         db.upsert("market.swing_signals", out, ["run_date", "symbol", "setup"])
     return out
+
+
+def levels(symbol: str, n: int = 3) -> dict:
+    """Current support/resistance zones for one stock (all confirmed swing levels in the last ~6 months)."""
+    raw = db.query("SELECT date, open, high, low, close, adj_close, volume FROM market.prices "
+                   "WHERE symbol = :s ORDER BY date", s=symbol)
+    raw["date"] = pd.to_datetime(raw["date"])
+    df = indicators(raw.set_index("date"))
+    h, l, c, a = df["high"].to_numpy(), df["low"].to_numpy(), float(df["close"].iat[-1]), float(df["atr"].iat[-1])
+    K, N = PIVOT_K, len(df)
+    lo = [l[p] for p in range(max(K, N - SR_LOOKBACK * 2), N - K) if l[p] == l[p - K:p + K + 1].min()]
+    hi = [h[p] for p in range(max(K, N - SR_LOOKBACK * 2), N - K) if h[p] == h[p - K:p + K + 1].max()]
+
+    def zones(pts):
+        pts = sorted(pts)
+        out, cur = [], []
+        for x in pts:
+            if cur and x - cur[-1] > 0.5 * a:
+                out.append(cur)
+                cur = []
+            cur.append(x)
+        if cur:
+            out.append(cur)
+        return [{"level": float(np.mean(z)), "touches": len(z)} for z in out]
+
+    sup = sorted([z for z in zones(lo) if z["level"] < c], key=lambda z: -z["level"])[:n]
+    res = sorted([z for z in zones(hi) if z["level"] > c], key=lambda z: z["level"])[:n]
+    for z in sup + res:
+        z["distance"] = z["level"] / c - 1
+    return {"symbol": symbol, "close": c, "atr": a, "supports": sup, "resistances": res,
+            "sma50": float(df["sma50"].iat[-1]), "sma200": float(df["sma200"].iat[-1]),
+            "sma200_rising": bool(df["sma200_rising"].iat[-1])}
