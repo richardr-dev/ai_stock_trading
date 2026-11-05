@@ -124,6 +124,28 @@ def _show_top(n: int = 100, market: str | None = None, uptrend_only: bool = Fals
     console.print(t)
 
 
+def _show_forecast(n: int = 30, uptrend_only: bool = True):
+    f = db.query("""SELECT f.*, t.name FROM market.forecasts f JOIN market.tickers t USING (symbol)
+                    WHERE run_date = (SELECT max(run_date) FROM market.forecasts)""")
+    if uptrend_only:
+        f = f[f["above_200d"]]
+    f = f.sort_values("reward_risk", ascending=False).head(n)
+    t = Table(title=f"Highest potential per unit of risk — next ~3 months ({'uptrend only' if uptrend_only else 'all'})")
+    for c in ("#", "Symbol", "Name", "Mkt", "Exp 3m", "Likely range (±1σ)", "P(gain)", "Vol 3m",
+              "Bad case (5%)", "MaxDD 1y", "Beta", "R/R", "Efficient"):
+        t.add_column(c, justify="left" if c in ("Symbol", "Name") else "right")
+    pc = lambda x: "" if x is None or pd.isna(x) else f"{x:+.1%}"
+    for i, (_, r) in enumerate(f.iterrows(), 1):
+        t.add_row(str(i), r.symbol, (r["name"] or "")[:22], r.market, pc(r.exp_ret_3m),
+                  f"{r.low_3m:+.0%} … {r.high_3m:+.0%}", f"{r.prob_gain:.0%}", f"{r.vol_3m:.0%}",
+                  pc(r.var95_3m), pc(r.max_dd_1y), "" if pd.isna(r.beta) else f"{r.beta:.2f}",
+                  f"{r.reward_risk:.2f}", "⭐" if r.pareto else "")
+    console.print(t)
+    console.print("[dim]Exp 3m = historical median for this score decile, blended 60/40 with the analyst target "
+                  "(3-month slice). R/R = Exp 3m ÷ 3-month volatility. ⭐ = efficient: nothing else offers more "
+                  "upside with less risk. Survivorship bias applies; treat as ranking, not promise.[/]")
+
+
 def cmd_analyze(_):
     from .dcf import run_dcf
     from .factors import run_signals, rate_regime
@@ -133,6 +155,9 @@ def cmd_analyze(_):
     console.print(f"DCF: {len(d)} valuations")
     with console.status("Scoring factors…"):
         run_signals()
+    from .forecast import run_forecast
+    with console.status("Forecasting 3-month potential vs risk…"):
+        run_forecast()
     build_portfolio()
     console.print(f"Rate regime: {rate_regime()}")
     _show_signals()
@@ -185,6 +210,9 @@ def main(argv=None):
     hr.add_argument("symbol")
     hsub.add_parser("list")
     sub.add_parser("review", help="compare your holdings with the model book")
+    fc = sub.add_parser("forecast", help="highest potential with lowest risk (3-month view)")
+    fc.add_argument("-n", type=int, default=30)
+    fc.add_argument("--all", action="store_true", help="include stocks in a downtrend")
     tp = sub.add_parser("top", help="best-ranked stocks across both markets")
     tp.add_argument("-n", type=int, default=100)
     tp.add_argument("--market", choices=["US", "ID", "us", "id"])
@@ -215,6 +243,8 @@ def main(argv=None):
         build_portfolio(pd.Timestamp(db.query("SELECT max(run_date) d FROM market.signals")["d"].iloc[0]).date())
         _show_holdings()
         _show_review()
+    elif a.cmd == "forecast":
+        _show_forecast(a.n, not a.all)
     elif a.cmd == "top":
         _show_top(a.n, a.market, a.uptrend)
     elif a.cmd == "show":

@@ -260,3 +260,56 @@ def breakeven_view(book: pd.DataFrame) -> None:
                    "−50% needs +100%. The market doesn't know your buy price. The useful question is: "
                    "*would I buy this stock today with fresh money?* If yes, holding is fine. If not, waiting to "
                    "break even means losing time you could spend compounding somewhere better.")
+
+
+# ── 🎯 Potential vs Risk ─────────────────────────────────────────────────
+def potential_risk_view() -> None:
+    f = db.query("""SELECT f.*, t.name, t.sector FROM market.forecasts f JOIN market.tickers t USING (symbol)
+                    WHERE run_date = (SELECT max(run_date) FROM market.forecasts)""")
+    if f.empty:
+        st.info("No forecast yet — run `python -m jarvis analyze`.")
+        return
+    cal = db.query("SELECT * FROM market.forecast_calibration ORDER BY decile")
+    c1, c2, c3 = st.columns([1, 1, 2])
+    up_only = c1.toggle("Uptrend only (buyable)", value=True)
+    mkt = c2.radio("Market", ["All", "US", "ID"], horizontal=True)
+    risk_axis = c3.radio("Risk measured as", ["vol_3m", "var95_3m", "max_dd_1y"], horizontal=True,
+                         format_func=lambda k: {"vol_3m": "3-month volatility", "var95_3m": "Bad case (5%)",
+                                                "max_dd_1y": "Max drawdown 1y"}[k])
+    v = f[f["above_200d"]] if up_only else f
+    if mkt != "All":
+        v = v[v["market"] == mkt]
+    v = v.assign(risk=v[risk_axis].abs(), label=np.where(v["reward_risk"].rank(ascending=False) <= 15,
+                                                          v["symbol"].str.replace(".JK", ""), ""))
+    fig = px.scatter(v, x="risk", y="exp_ret_3m", color="market", symbol="pareto", text="label",
+                     hover_name="name", hover_data={"symbol": True, "prob_gain": ":.0%", "low_3m": ":.0%",
+                                                    "high_3m": ":.0%", "reward_risk": ":.2f", "label": False},
+                     color_discrete_map={"US": "#4c8bf5", "ID": "#e5533d"},
+                     labels={"risk": "Risk →", "exp_ret_3m": "Expected 3-month return ↑"})
+    fig.update_traces(textposition="top center", marker=dict(size=11))
+    fig.update_layout(height=560, yaxis_tickformat=".0%", xaxis_tickformat=".0%",
+                      margin=dict(l=10, r=10, t=30, b=10), legend_title_text="")
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Top-left = best (more upside, less risk). Diamonds/★ = efficient frontier: nothing else beats them "
+               "on both. Labels = top 15 by reward/risk.")
+
+    t = v.sort_values("reward_risk", ascending=False)[
+        ["symbol", "name", "market", "sector", "exp_ret_3m", "low_3m", "high_3m", "prob_gain", "vol_3m",
+         "var95_3m", "max_dd_1y", "beta", "reward_risk", "pareto"]]
+    pc = {k: st.column_config.NumberColumn(lbl, format="percent") for k, lbl in
+          [("exp_ret_3m", "Exp 3m"), ("low_3m", "Low (−1σ)"), ("high_3m", "High (+1σ)"), ("prob_gain", "P(gain)"),
+           ("vol_3m", "Vol 3m"), ("var95_3m", "Bad case 5%"), ("max_dd_1y", "MaxDD 1y")]}
+    st.dataframe(t, hide_index=True, width="stretch", height=520, column_config=pc | {
+        "beta": st.column_config.NumberColumn(format="%.2f"),
+        "reward_risk": st.column_config.NumberColumn("Reward/Risk", format="%.2f"),
+        "pareto": st.column_config.CheckboxColumn("⭐ Efficient")})
+
+    with st.expander("How is this forecast made? (calibration from ~10,000 historical 3-month outcomes)"):
+        st.markdown("Every month-end over ~5 years, every stock was scored with the same price factors and "
+                    "bucketed into 10 deciles; then its **actual** next-3-month return was recorded. "
+                    "Decile 10 = best score.")
+        st.dataframe(cal[["decile", "n", "median", "mean", "p10", "p90", "prob_pos"]], hide_index=True,
+                     width="stretch", column_config={k: st.column_config.NumberColumn(format="percent")
+                                                     for k in ("median", "mean", "p10", "p90", "prob_pos")})
+        st.caption("Expected 3m = 60% this historical median + 40% analyst target (3-month slice, capped ±15%). "
+                   "Survivorship bias: the universe is today's large caps, so history looks better than reality.")

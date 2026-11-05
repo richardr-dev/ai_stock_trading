@@ -1,0 +1,11 @@
+# Streamlit settings for the JARVIS dashboard (read automatically by `streamlit run`)
+[server]
+address = "127.0.0.1"      # laptop only; Tailscale `serve` publishes it to your tailnet
+port = 8501
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"

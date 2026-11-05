@@ -47,7 +47,7 @@ c[3].metric("BI rate", f"{reg['ID']['bi_rate']:.2f}%")
 c[4].metric("S&P trend", "▲ above 200d" if bench.get("US") else "▼ below 200d")
 c[5].metric("JCI trend", "▲ above 200d" if bench.get("ID") else "▼ below 200d")
 
-TAB_NAMES = ["💼 My Holdings", "🌐 All Stocks", "🏦 Rates & Value", "📋 Model Book", "💰 DCF", "🔍 Ticker",
+TAB_NAMES = ["💼 My Holdings", "🌐 All Stocks", "🎯 Potential vs Risk", "🏦 Rates & Value", "📋 Model Book", "💰 DCF", "🔍 Ticker",
              "🧪 Backtest", "🤖 Ask JARVIS", "🗒️ Briefs"]
 T = dict(zip(TAB_NAMES, st.tabs(TAB_NAMES)))
 
@@ -169,6 +169,10 @@ with T["📋 Model Book"]:
 with T["🌐 All Stocks"]:
     from app_views import all_stocks_view
     all_stocks_view(sig, port, _rebuild)
+
+with T["🎯 Potential vs Risk"]:
+    from app_views import potential_risk_view
+    potential_risk_view()
 
 with T["🏦 Rates & Value"]:
     from app_views import rates_value_view

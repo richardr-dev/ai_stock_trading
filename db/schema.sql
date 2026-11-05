@@ -135,6 +135,21 @@ CREATE TABLE IF NOT EXISTS market.ai_briefs (
     content    TEXT
 );
 
+
+-- 3-month potential vs risk forecast (see jarvis/forecast.py)
+CREATE TABLE IF NOT EXISTS market.forecast_calibration (
+    decile INTEGER PRIMARY KEY, run_date DATE, n INTEGER, mean DOUBLE PRECISION, median DOUBLE PRECISION,
+    p10 DOUBLE PRECISION, p90 DOUBLE PRECISION, prob_pos DOUBLE PRECISION
+);
+CREATE TABLE IF NOT EXISTS market.forecasts (
+    symbol TEXT NOT NULL, run_date DATE NOT NULL, market TEXT, price DOUBLE PRECISION, decile INTEGER,
+    hist_median_3m DOUBLE PRECISION, hist_p10_3m DOUBLE PRECISION, hist_prob_pos DOUBLE PRECISION,
+    analyst_3m DOUBLE PRECISION, exp_ret_3m DOUBLE PRECISION, low_3m DOUBLE PRECISION, high_3m DOUBLE PRECISION,
+    prob_gain DOUBLE PRECISION, vol_3m DOUBLE PRECISION, var95_3m DOUBLE PRECISION, max_dd_1y DOUBLE PRECISION,
+    beta DOUBLE PRECISION, reward_risk DOUBLE PRECISION, above_200d BOOLEAN, pareto BOOLEAN, rr_rank INTEGER,
+    PRIMARY KEY (symbol, run_date)
+);
+
 -- Cross-market ranking (added later; ALTER keeps existing databases in sync)
 ALTER TABLE market.signals ADD COLUMN IF NOT EXISTS global_score DOUBLE PRECISION;
 ALTER TABLE market.signals ADD COLUMN IF NOT EXISTS global_rank INTEGER;
