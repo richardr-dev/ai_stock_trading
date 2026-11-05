@@ -22,6 +22,14 @@ def q(sql: str) -> pd.DataFrame:
     return db.query(sql)
 
 
+def _rebuild():
+    """Recompute model targets against the updated holdings."""
+    from jarvis.portfolio import build_portfolio
+    d = db.query("SELECT max(run_date) d FROM market.signals")["d"].iloc[0]
+    if d is not None:
+        build_portfolio(pd.Timestamp(d).date())
+
+
 sig = q("SELECT * FROM market.v_latest_signals")
 port = q("SELECT * FROM market.v_latest_portfolio")
 dcf = q("""SELECT DISTINCT ON (symbol) d.*, t.name, t.market, t.sector FROM market.dcf_valuations d
@@ -41,19 +49,100 @@ c[5].metric("JCI trend", "▲ above 200d" if bench.get("ID") else "▼ below 200
 tabs = st.tabs(["💼 My Holdings", "📋 Portfolio", "📈 Signals", "💰 DCF", "🔍 Ticker", "🧪 Backtest", "🤖 Ask JARVIS", "🗒️ Briefs"])
 
 with tabs[0]:
-    from jarvis.holdings import current_book, review
+    from jarvis.config import all_tickers
+    from jarvis.holdings import current_book, remove_holding, review, set_holding, usdidr
+
     book = current_book()
+    fx = usdidr()
     if book.empty:
-        st.info("No holdings yet: `python -m jarvis holdings set BBCA.JK --value 580000000`")
+        st.info("No holdings yet — add your first position below.")
     else:
-        st.metric("Total (USD)", f"${book.value_usd.sum():,.0f}")
-        st.dataframe(book[["symbol", "shares", "price", "value_local", "value_usd", "weight"]], hide_index=True,
-                     width="stretch", column_config={"weight": st.column_config.ProgressColumn(
-                         "Weight", format="percent", min_value=0, max_value=1),
-                         "value_usd": st.column_config.NumberColumn("≈ USD", format="$%,.0f"),
-                         "value_local": st.column_config.NumberColumn("Value (local)", format="%,.0f")})
-        st.subheader("Model review")
-        st.dataframe(review(), hide_index=True, width="stretch")
+        idr_val = book.loc[book.market == "ID", "value_local"].sum()
+        us_val = book.loc[book.market == "US", "value_local"].sum()
+        has_cost = book["cost_basis"].notna()
+        cost_usd = (book.loc[has_cost, "shares"] * book.loc[has_cost, "cost_basis"]
+                    / book.loc[has_cost, "market"].map({"ID": fx, "US": 1.0}).astype(float)).sum()
+        val_usd_costed = book.loc[has_cost, "value_usd"].sum()
+        m = st.columns(4)
+        m[0].metric("Total portfolio", f"${book.value_usd.sum():,.0f}", help=f"USD/IDR {fx:,.0f}")
+        m[1].metric("🇮🇩 Indonesia", f"Rp{idr_val:,.0f}", f"{idr_val / fx / book.value_usd.sum():.0%} of book",
+                    delta_color="off")
+        m[2].metric("🇺🇸 US", f"${us_val:,.0f}", f"{us_val / book.value_usd.sum():.0%} of book", delta_color="off")
+        m[3].metric("Unrealised P/L", f"${val_usd_costed - cost_usd:+,.0f}" if has_cost.any() else "—",
+                    f"{val_usd_costed / cost_usd - 1:+.1%}" if has_cost.any() and cost_usd else
+                    "add avg cost below", delta_color="normal" if has_cost.any() else "off")
+
+        left, right = st.columns([2, 1])
+        with left:
+            show = book.copy()
+            show["avg_cost"] = show["cost_basis"]
+            show["pnl"] = (show["price"] / show["cost_basis"] - 1).where(has_cost)
+            show["value"] = show.apply(lambda r: f"Rp{r.value_local:,.0f}" if r.market == "ID"
+                                       else f"${r.value_local:,.2f}", axis=1)
+            st.dataframe(show[["symbol", "shares", "avg_cost", "price", "pnl", "value", "value_usd", "weight"]],
+                         hide_index=True, width="stretch", column_config={
+                             "shares": st.column_config.NumberColumn("Shares", format="%,.0f"),
+                             "avg_cost": st.column_config.NumberColumn("Avg cost", format="%,.2f"),
+                             "price": st.column_config.NumberColumn("Last", format="%,.2f"),
+                             "pnl": st.column_config.NumberColumn("P/L", format="percent"),
+                             "value": "Value",
+                             "value_usd": st.column_config.NumberColumn("≈ USD", format="$%,.0f"),
+                             "weight": st.column_config.ProgressColumn("Weight", format="percent",
+                                                                       min_value=0, max_value=1)})
+        with right:
+            pie = go.Figure(go.Pie(labels=book["symbol"], values=book["value_usd"], hole=0.55,
+                                   textinfo="label+percent"))
+            pie.update_layout(height=260, margin=dict(l=0, r=0, t=0, b=0), showlegend=False)
+            st.plotly_chart(pie, width="stretch")
+
+        st.subheader("JARVIS verdict — your holdings vs the model book")
+        rv = review()
+        icon = {"SELL": "🔴 SELL", "TRIM": "🟠 TRIM", "HOLD": "🔵 HOLD", "ADD": "🟢 ADD", "BUY": "🟢 BUY"}
+        rv["verdict"] = rv["verdict"].map(icon)
+        rv["trade"] = rv.apply(lambda r: (f"Rp{r.trade_local:+,.0f}" if r.market == "ID"
+                                          else f"${r.trade_local:+,.0f}"), axis=1)
+        rv["units"] = rv.apply(lambda r: f"{r.trade_units:+,.0f} sh" + (f" ({r.trade_units / 100:+,.0f} lots)"
+                                                                         if r.market == "ID" else ""), axis=1)
+        st.dataframe(rv[["verdict", "symbol", "rank", "trend_ok", "ret_3m", "mom_12_1", "dcf_upside",
+                         "trade", "units", "stop", "reason"]], hide_index=True, width="stretch",
+                     column_config={"trend_ok": st.column_config.CheckboxColumn(">200d"),
+                                    "ret_3m": st.column_config.NumberColumn("3m", format="percent"),
+                                    "mom_12_1": st.column_config.NumberColumn("12-1m", format="percent"),
+                                    "dcf_upside": st.column_config.NumberColumn("DCF %", format="%.0f"),
+                                    "stop": st.column_config.NumberColumn("Stop", format="%,.2f")})
+        cash = port[port["symbol"].str.startswith("CASH_")] if not port.empty else port
+        for _, c in cash.iterrows():
+            mk = c.symbol.split("_")[1]
+            amt = f"Rp{c.amount_usd * fx:,.0f}" if mk == "ID" else f"${c.amount_usd:,.0f}"
+            st.caption(f"💵 Model keeps **{amt}** in cash ({mk}) — {c.reason}")
+
+    with st.expander("✏️ Add / edit / remove a position", expanded=book.empty):
+        universe = sorted(s for lst in all_tickers().values() for s in lst)
+        with st.form("holding_form"):
+            c1, c2, c3 = st.columns(3)
+            sym = c1.selectbox("Ticker", universe,
+                               index=universe.index("BBCA.JK") if "BBCA.JK" in universe else 0)
+            cur = book[book.symbol == sym] if not book.empty else book
+            shares = c2.number_input("Shares (IDX: lots × 100)", min_value=0.0, step=100.0,
+                                     value=float(round(cur["shares"].iloc[0])) if len(cur) else 0.0)
+            cost = c3.number_input("Avg cost / share (optional)", min_value=0.0,
+                                   value=float(cur["cost_basis"].iloc[0]) if len(cur) and
+                                   pd.notna(cur["cost_basis"].iloc[0]) else 0.0)
+            b1, b2 = st.columns(2)
+            save = b1.form_submit_button("💾 Save position", type="primary")
+            delete = b2.form_submit_button("🗑️ Remove position")
+        if save and shares > 0:
+            set_holding(sym, shares=shares, cost_basis=cost or None)
+            _rebuild()
+            st.cache_data.clear()
+            st.rerun()
+        if delete:
+            remove_holding(sym)
+            _rebuild()
+            st.cache_data.clear()
+            st.rerun()
+        st.caption("The ticker list is the stock universe. To track a new stock, add it to config/settings.yaml "
+                   "and run `python -m jarvis run`. Saving here re-computes the model's targets instantly.")
 
 with tabs[1]:
     if port.empty:

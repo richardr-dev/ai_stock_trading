@@ -48,6 +48,8 @@ def current_book() -> pd.DataFrame:
     if h.empty:
         return h
     fx = usdidr()
+    h["shares"] = pd.to_numeric(h["shares"], errors="coerce")
+    h["cost_basis"] = pd.to_numeric(h["cost_basis"], errors="coerce")
     h["market"] = h["symbol"].map(market_of)
     h["price"] = h["symbol"].map(last_price)
     h["value_local"] = h["shares"] * h["price"]
