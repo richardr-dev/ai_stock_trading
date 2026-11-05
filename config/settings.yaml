@@ -9,14 +9,30 @@ universe:
     tickers: [AAPL, MSFT, NVDA, GOOGL, AMZN, META, TSLA, AVGO, AMD, TSM,
               UBER, NFLX, CRM, ORCL, ADBE, NOW, PLTR, SHOP, ASML, MU,
               COST, WMT, JPM, V, MA, GS, LLY, UNH, ABBV, ISRG,
-              CAT, GE, XOM, ANET, PANW, CRWD, INTU, BKNG, SPOT, QCOM]
+              CAT, GE, XOM, ANET, PANW, CRWD, INTU, BKNG, SPOT, QCOM,
+              # broad large caps
+              BRK-B, JNJ, PG, KO, PEP, MRK, PFE, TMO, ABT, DHR,
+              AMGN, GILD, VRTX, REGN, BSX, SYK, MDT, HD, LOW, MCD,
+              SBUX, NKE, TJX, CMG, ABNB, DIS, CMCSA, T, VZ, TMUS,
+              BAC, WFC, MS, C, SCHW, BLK, AXP, PYPL, SPGI, PGR,
+              CVX, COP, SLB, NEE, LIN, HON, RTX, LMT, BA, DE,
+              UNP, UPS, IBM, CSCO, TXN, INTC, AMAT, LRCX, KLAC, ADI,
+              # growth / momentum names
+              MRVL, SNOW, DDOG, NET, ZS, APP, MELI, COIN, HOOD, RBLX,
+              DASH, ARM, SMCI, VST, CEG, GEV, ETN, DELL, WDAY, TTD]
   ID:
     benchmark: ^JKSE
     tickers: [BBCA.JK, BBRI.JK, BMRI.JK, BBNI.JK, TLKM.JK, ASII.JK, UNVR.JK,
               ICBP.JK, INDF.JK, ADRO.JK, ANTM.JK, MDKA.JK, GOTO.JK, AMMN.JK,
               CPIN.JK, KLBF.JK, PGAS.JK, PTBA.JK, ITMG.JK, UNTR.JK, SMGR.JK,
               INCO.JK, AMRT.JK, MEDC.JK, EXCL.JK, ISAT.JK, JPFA.JK, ACES.JK,
-              BRIS.JK, MAPI.JK, NCKL.JK]
+              BRIS.JK, MAPI.JK, NCKL.JK,
+              # LQ45 / IDX80 additions
+              ARTO.JK, BBTN.JK, BRPT.JK, ESSA.JK, HRUM.JK, INKP.JK, TKIM.JK,
+              MIKA.JK, HEAL.JK, SIDO.JK, MYOR.JK, TOWR.JK, TBIG.JK, AKRA.JK,
+              SRTG.JK, CTRA.JK, BSDE.JK, PWON.JK, SMRA.JK, INTP.JK, TINS.JK,
+              ERAA.JK, BUKA.JK, EMTK.JK, MBMA.JK, ADMR.JK, AADI.JK, PGEO.JK,
+              BUMI.JK, DSSA.JK, CUAN.JK, MTEL.JK, AVIA.JK, BFIN.JK]
 
 # Interest-rate / macro series
 rates:

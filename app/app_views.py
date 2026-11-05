@@ -124,25 +124,30 @@ def all_stocks_view(sig: pd.DataFrame, port: pd.DataFrame, rebuild) -> None:
         st.plotly_chart(fig, width="stretch")
         st.caption("Box size = market cap (USD). Colour = return over the chosen period.")
     else:
-        cols = ["status", "name", "market", "sector", "px", "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_ytd",
+        cols = ["global_rank", "status", "name", "market", "sector", "px", "ret_1d", "ret_1w", "ret_1m", "ret_3m", "ret_ytd",
                 "mom_12_1", "trend_6m", "pct_of_52w_high", "above_200d", "rank_in_market", "composite",
                 "dcf_upside", "analyst_upside", "forward_pe", "div_yield", "vol_ann", "mcap_usd_bn"]
         pct = {k: st.column_config.NumberColumn(lbl, format="percent") for k, lbl in
                [("ret_1d", "1D"), ("ret_1w", "1W"), ("ret_1m", "1M"), ("ret_3m", "3M"), ("ret_ytd", "YTD"),
                 ("mom_12_1", "12-1M"), ("pct_of_52w_high", "% 52wH"), ("analyst_upside", "Analyst tgt"),
                 ("vol_ann", "Vol")]}
-        st.dataframe(v.sort_values(["market", "rank_in_market"])[cols], width="stretch", height=720,
+        top_only = st.toggle("Top 100 only (global rank)", value=False)
+        vv = v.sort_values("global_rank")
+        if top_only:
+            vv = vv[vv["global_rank"] <= 100]
+        st.dataframe(vv[cols], width="stretch", height=720,
                      column_config=pct | {
+                         "global_rank": st.column_config.NumberColumn("🏆 Global #", help="Rank across US + Indonesia"),
                          "status": "Status", "name": "Name", "px": "Price",
                          "trend_6m": st.column_config.LineChartColumn("6M trend", width="small"),
                          "above_200d": st.column_config.CheckboxColumn(">200d"),
-                         "rank_in_market": st.column_config.NumberColumn("Rank"),
+                         "rank_in_market": st.column_config.NumberColumn("Mkt #", help="Rank within own market"),
                          "composite": st.column_config.NumberColumn("Score", format="%.2f"),
                          "dcf_upside": st.column_config.NumberColumn("DCF %", format="%.0f"),
                          "forward_pe": st.column_config.NumberColumn("Fwd P/E", format="%.1f"),
                          "div_yield": st.column_config.NumberColumn("Div %", format="%.1f"),
                          "mcap_usd_bn": st.column_config.NumberColumn("Mcap $bn", format="%.1f")})
-        st.caption("Rank = model rank within its own market (1 = best). Score blends momentum, trend, DCF, "
+        st.caption("🏆 Global # ranks every stock across both markets (1 = best); Mkt # ranks within its own market. Score blends momentum, trend, DCF, "
                    "quality, revisions and rate sensitivity. Click any column header to sort.")
 
     with st.expander("🚫 Exclude stocks from the model (e.g. ABBV)"):

@@ -98,6 +98,32 @@ def _show_review():
         console.print(f"[dim]{c.symbol}: keep {_money(c.amount_usd * (fx if m == 'ID' else 1), m)} in cash — {c.reason}[/]")
 
 
+def _show_top(n: int = 100, market: str | None = None, uptrend_only: bool = False):
+    sig = db.query("""SELECT s.*, f.forward_pe FROM market.v_latest_signals s
+                      LEFT JOIN LATERAL (SELECT forward_pe FROM market.fundamentals x
+                                         WHERE x.symbol = s.symbol ORDER BY as_of DESC LIMIT 1) f ON true""")
+    held = set(db.query("SELECT symbol FROM market.holdings")["symbol"])
+    excl = set(db.query("SELECT symbol FROM market.exclusions")["symbol"])
+    if market:
+        sig = sig[sig["market"] == market.upper()]
+    if uptrend_only:
+        sig = sig[sig["above_200d"]]
+    sig = sig.sort_values("global_rank").head(n)
+    t = Table(title=f"J.A.R.V.I.S. top {len(sig)} — ranked across US + Indonesia (1 = best)")
+    for c in ("#", "Symbol", "Name", "Mkt", "Price", "1m", "3m", "12-1m", "%52wH", ">200d", "DCF", "FwdPE", "Score", "Note"):
+        t.add_column(c, justify="right" if c not in ("Symbol", "Name", "Note") else "left", overflow="fold")
+    pc = lambda x: "" if pd.isna(x) else f"{x:+.0%}"
+    for _, r in sig.iterrows():
+        note = "💼 held" if r.symbol in held else "🚫 excluded" if r.symbol in excl else \
+            ("" if r.above_200d else "downtrend")
+        t.add_row(str(r.global_rank), r.symbol, (r["name"] or "")[:24], r.market,
+                  f"Rp{r.price:,.0f}" if r.market == "ID" else f"${r.price:,.2f}",
+                  pc(r.ret_1m), pc(r.ret_3m), pc(r.mom_12_1), f"{r.pct_of_52w_high:.0%}",
+                  "✓" if r.above_200d else "✗", "" if pd.isna(r.dcf_upside) else f"{r.dcf_upside:+.0f}%",
+                  "" if pd.isna(r.forward_pe) else f"{r.forward_pe:.1f}", f"{r.global_score:+.2f}", note)
+    console.print(t)
+
+
 def cmd_analyze(_):
     from .dcf import run_dcf
     from .factors import run_signals, rate_regime
@@ -159,6 +185,10 @@ def main(argv=None):
     hr.add_argument("symbol")
     hsub.add_parser("list")
     sub.add_parser("review", help="compare your holdings with the model book")
+    tp = sub.add_parser("top", help="best-ranked stocks across both markets")
+    tp.add_argument("-n", type=int, default=100)
+    tp.add_argument("--market", choices=["US", "ID", "us", "id"])
+    tp.add_argument("--uptrend", action="store_true", help="only stocks above their 200-day average")
     rn = sub.add_parser("run")
     rn.add_argument("--no-brief", action="store_true")
     a = p.parse_args(argv)
@@ -185,6 +215,8 @@ def main(argv=None):
         build_portfolio(pd.Timestamp(db.query("SELECT max(run_date) d FROM market.signals")["d"].iloc[0]).date())
         _show_holdings()
         _show_review()
+    elif a.cmd == "top":
+        _show_top(a.n, a.market, a.uptrend)
     elif a.cmd == "show":
         _show_signals()
         _show_portfolio()

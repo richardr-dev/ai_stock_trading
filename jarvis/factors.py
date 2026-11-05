@@ -157,6 +157,17 @@ def run_signals(run_date: date | None = None) -> pd.DataFrame:
         frames.append(g)
     out = pd.concat(frames)
 
+    # Global pass: same factors, ranked across BOTH markets together, so a crashing market's
+    # "best" stock doesn't look as good as a rising market's best stock.
+    gz = pd.DataFrame(index=out.index)
+    for f_ in PRICE_FACTORS:
+        gz[f_] = rank_score(out[f_])
+    gz["dcf_value"] = rank_score(out["dcf_upside"])
+    gz["quality"] = rank_score(out["quality_score"])
+    gz["revisions"] = rank_score(out["revisions_score"])
+    out["global_score"] = sum(w[k] * gz[k] for k in w)
+    out["global_rank"] = out["global_score"].rank(ascending=False, method="first").astype(int)
+
     rows = []
     for sym, r in out.iterrows():
         rows.append({
@@ -166,6 +177,7 @@ def run_signals(run_date: date | None = None) -> pd.DataFrame:
             "vol_ann": r["vol_ann"], "atr_pct": _atr_pct(sym), "dcf_upside": r["upside_pct"],
             "quality": r["quality_score"], "revisions": r["revisions_score"],
             "composite": r["composite"], "rank_in_market": int(r["rank_in_market"]),
+            "global_score": r["global_score"], "global_rank": int(r["global_rank"]),
             "factor_z": r["factor_z"],
         })
     db.execute("DELETE FROM market.signals WHERE run_date = :d", d=run_date)

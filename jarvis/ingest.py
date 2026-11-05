@@ -17,14 +17,27 @@ log = logging.getLogger("jarvis.ingest")
 
 
 # ── Prices ────────────────────────────────────────────────────────────────
-def _has_history() -> bool:
-    df = db.query("SELECT count(*) AS n FROM market.prices")
-    return int(df["n"].iloc[0]) > 1000
+def _symbols_with_history(min_rows: int = 500) -> set[str]:
+    df = db.query("SELECT symbol FROM market.prices GROUP BY symbol HAVING count(*) >= :n", n=min_rows)
+    return set(df["symbol"])
 
 
 def ingest_prices(symbols: list[str], period: str | None = None) -> int:
-    period = period or ("6mo" if _has_history() else "6y")
-    log.info("Downloading prices for %d symbols (period=%s)", len(symbols), period)
+    """New symbols get 6y of history; known symbols get a 6-month refresh (cheap, idempotent)."""
+    if period:
+        groups = {period: symbols}
+    else:
+        known = _symbols_with_history()
+        groups = {"6mo": [s for s in symbols if s in known], "6y": [s for s in symbols if s not in known]}
+    total = 0
+    for per, syms in groups.items():
+        if syms:
+            log.info("Downloading prices for %d symbols (period=%s)", len(syms), per)
+            total += _download(syms, per)
+    return total
+
+
+def _download(symbols: list[str], period: str) -> int:
     total = 0
     for i in range(0, len(symbols), 25):          # batches keep Yahoo happy
         batch = symbols[i:i + 25]

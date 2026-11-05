@@ -135,22 +135,29 @@ CREATE TABLE IF NOT EXISTS market.ai_briefs (
     content    TEXT
 );
 
--- Convenience views
-CREATE OR REPLACE VIEW market.v_latest_signals AS
+-- Cross-market ranking (added later; ALTER keeps existing databases in sync)
+ALTER TABLE market.signals ADD COLUMN IF NOT EXISTS global_score DOUBLE PRECISION;
+ALTER TABLE market.signals ADD COLUMN IF NOT EXISTS global_rank INTEGER;
+
+-- Convenience views (dropped + recreated so new columns show up)
+DROP VIEW IF EXISTS market.v_latest_signals;
+DROP VIEW IF EXISTS market.v_latest_portfolio;
+DROP VIEW IF EXISTS market.v_latest_rates;
+CREATE VIEW market.v_latest_signals AS
 SELECT s.*, t.name, t.sector
 FROM market.signals s
 JOIN market.tickers t USING (symbol)
 WHERE s.run_date = (SELECT max(run_date) FROM market.signals)
 ORDER BY s.market, s.rank_in_market;
 
-CREATE OR REPLACE VIEW market.v_latest_portfolio AS
+CREATE VIEW market.v_latest_portfolio AS
 SELECT r.*, t.name, t.sector
 FROM market.recommendations r
 JOIN market.tickers t USING (symbol)
 WHERE r.run_date = (SELECT max(run_date) FROM market.recommendations)
 ORDER BY r.weight DESC;
 
-CREATE OR REPLACE VIEW market.v_latest_rates AS
+CREATE VIEW market.v_latest_rates AS
 SELECT DISTINCT ON (series_id) series_id, date, value, source
 FROM market.macro_rates
 ORDER BY series_id, date DESC;
