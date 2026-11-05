@@ -38,7 +38,8 @@ def choices() -> pd.DataFrame:
     excl = set(db.query("SELECT symbol FROM market.exclusions")["symbol"])
     fc = db.query("""SELECT symbol, exp_ret_3m, vol_3m, rr_rank FROM market.forecasts
                      WHERE run_date = (SELECT max(run_date) FROM market.forecasts)""").set_index("symbol")
-    px = db.load_prices(sig["symbol"].tolist())
+    # same frame as factors.run_signals (joint US+ID calendar, forward-filled) so averages match the model
+    px = db.load_prices(sig["symbol"].tolist(), start=pd.Timestamp.today() - pd.DateOffset(days=420)).ffill()
     bench = benchmark_trend()
 
     rows = []
@@ -64,7 +65,7 @@ def choices() -> pd.DataFrame:
             blockers = []
             if not trend_ok:
                 need = sma200 / r.price - 1 if pd.notna(sma200) else np.nan
-                blockers.append(f"below 200-day avg {_money(sma200, mkt)} — needs {need:+.0%} to qualify")
+                blockers.append(f"below 200-day avg {_money(sma200, mkt)} — needs {need:+.1%} to qualify")
             if not score_ok:
                 blockers.append(f"factor score negative ({r.composite:+.2f})")
             if not excl_ok:
