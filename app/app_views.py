@@ -38,6 +38,75 @@ def _latest(r: pd.DataFrame, sid: str):
     return float(s["value"].iloc[-1]) if not s.empty else None
 
 
+# ── ✅ Choices ────────────────────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def _choices() -> pd.DataFrame:
+    from jarvis.screen import choices
+    return choices()
+
+
+def choices_view() -> None:
+    from jarvis.screen import explain
+    df = _choices()
+    if df.empty:
+        st.info("No signals yet — run `python -m jarvis analyze`.")
+        return
+    st.caption("Every stock in the universe, checked against the model's buy rules: "
+               "**① price above 200-day average · ② factor score > 0 · ③ top-N rank in its market "
+               "(US 6, ID 4) · ④ not excluded by you.** Fail ① or ② → not buyable. Pass all but ③ → buyable, "
+               "waiting in line behind higher-ranked stocks.")
+    cnt = df["status"].value_counts()
+    a = st.columns(4)
+    a[0].metric("✅ Model buys", int(cnt.filter(like="✅").sum()))
+    a[1].metric("🟢 Buyable (you can choose)", int(cnt.filter(like="🟢").sum()))
+    a[2].metric("⛔ Not buyable", int(cnt.get("⛔ Not buyable", 0)))
+    a[3].metric("💼 Held → SELL", int(cnt.get("💼 Held → SELL", 0)))
+
+    # why / why not
+    syms = df["symbol"].tolist()
+    held = df.loc[df["held"], "symbol"].tolist()
+    default = syms.index(held[0]) if held else 0
+    pick = st.selectbox("🔎 Why is this stock in / not in the list?", syms, index=default,
+                        format_func=lambda s: f"{s} — {df.set_index('symbol').at[s, 'name']}")
+    lines = explain(pick, df)
+    st.markdown(f"**{lines[0]}**\n\n" + "\n\n".join(lines[1:]))
+    r = df.set_index("symbol").loc[pick]
+    if not r.trend_ok and pd.notna(r.sma200):
+        st.progress(float(np.clip(r.price / r.sma200, 0, 1)),
+                    text=f"Price is {r.price / r.sma200:.0%} of its 200-day average — needs 100% to qualify")
+
+    c1, c2, c3 = st.columns([1, 2, 2])
+    mkt = c1.radio("Market ", ["All", "🇺🇸 US", "🇮🇩 ID"], horizontal=True)
+    stat = c2.multiselect("Status", sorted(df["status"].unique()),
+                          default=[s for s in df["status"].unique() if "Not buyable" not in s])
+    sector = c3.multiselect("Sector ", sorted(df["sector"].dropna().unique()))
+    v = df.copy()
+    if mkt != "All":
+        v = v[v["market"] == ("US" if "US" in mkt else "ID")]
+    if stat:
+        v = v[v["status"].isin(stat)]
+    if sector:
+        v = v[v["sector"].isin(sector)]
+    v["px"] = [f"Rp{p:,.0f}" if m == "ID" else f"${p:,.2f}" for p, m in zip(v["price"], v["market"])]
+    v["200d"] = [f"Rp{p:,.0f}" if m == "ID" else f"${p:,.2f}" for p, m in zip(v["sma200"], v["market"])]
+    v["rank_s"] = v["rank"].astype(str) + "/" + v["of"].astype(str)
+    st.dataframe(
+        v[["status", "symbol", "name", "market", "sector", "rank_s", "global_rank", "px", "200d", "vs_200d",
+           "ret_1m", "ret_3m", "mom_12_1", "exp_ret_3m", "dcf_upside", "why"]],
+        hide_index=True, width="stretch", height=600,
+        column_config={
+            "rank_s": "Rank in mkt", "global_rank": "Global #", "px": "Price", "200d": "200-day avg",
+            "vs_200d": st.column_config.NumberColumn("vs 200d", format="percent"),
+            "ret_1m": st.column_config.NumberColumn("1m", format="percent"),
+            "ret_3m": st.column_config.NumberColumn("3m", format="percent"),
+            "mom_12_1": st.column_config.NumberColumn("12-1m", format="percent"),
+            "exp_ret_3m": st.column_config.NumberColumn("Exp 3m", format="percent"),
+            "dcf_upside": st.column_config.NumberColumn("DCF %", format="%.0f"),
+            "why": st.column_config.TextColumn("Why", width="large"),
+        })
+    st.caption(f"Showing {len(v)} of {len(df)}. CLI: `python -m jarvis choices` · `python -m jarvis why BBCA`")
+
+
 # ── 🌐 All Stocks ─────────────────────────────────────────────────────────
 def all_stocks_view(sig: pd.DataFrame, port: pd.DataFrame, rebuild) -> None:
     if sig.empty:

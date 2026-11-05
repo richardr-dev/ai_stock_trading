@@ -18,6 +18,8 @@ python -m jarvis show              # print latest ranking + book
 python -m jarvis ask "Should I rotate from NVDA into UBER?"
 python -m jarvis chat              # interactive JARVIS
 python -m jarvis backtest --months 3
+python -m jarvis choices           # every stock: buyable or not, and why (--buyable, --market ID)
+python -m jarvis why BBCA NCKL     # rule-by-rule checklist: why a stock is (not) on the buy list
 ./scripts/start_dashboard.sh       # web UI at http://127.0.0.1:8501
 ```
 

@@ -8,6 +8,8 @@
   python -m jarvis chat            interactive chat
   python -m jarvis backtest        walk-forward backtest of the price factors
   python -m jarvis run             ingest + analyze + brief (what the weekly job runs)
+  python -m jarvis choices         every stock: buyable or not, and why
+  python -m jarvis why BBCA.JK     rule-by-rule checklist for one stock
 """
 from __future__ import annotations
 
@@ -122,6 +124,27 @@ def _show_top(n: int = 100, market: str | None = None, uptrend_only: bool = Fals
                   "✓" if r.above_200d else "✗", "" if pd.isna(r.dcf_upside) else f"{r.dcf_upside:+.0f}%",
                   "" if pd.isna(r.forward_pe) else f"{r.forward_pe:.1f}", f"{r.global_score:+.2f}", note)
     console.print(t)
+
+
+def _show_choices(market: str | None = None, buyable_only: bool = False):
+    from .screen import choices
+    df = choices()
+    if market:
+        df = df[df["market"] == market.upper()]
+    if buyable_only:
+        df = df[~df["status"].str.contains("Not buyable|SELL")]
+    t = Table(title=f"All {len(df)} stocks — what you can choose and why (rules: trend > 200d · score > 0 · top-N rank)")
+    for c in ("Status", "Symbol", "Mkt", "Rank", "Price", "vs 200d", "3m", "12-1m", "Why"):
+        t.add_column(c, justify="right" if c in ("Rank", "Price", "vs 200d", "3m", "12-1m") else "left",
+                     overflow="fold")
+    pc = lambda x: "" if pd.isna(x) else f"{x:+.0%}"
+    for _, r in df.iterrows():
+        t.add_row(r.status, r.symbol, r.market, f"{r['rank']}/{r['of']}",
+                  f"Rp{r.price:,.0f}" if r.market == "ID" else f"${r.price:,.2f}",
+                  pc(r.vs_200d), pc(r.ret_3m), pc(r.mom_12_1), r.why)
+    console.print(t)
+    counts = df["status"].value_counts()
+    console.print(" · ".join(f"{k}: {v}" for k, v in counts.items()))
 
 
 def _show_forecast(n: int = 30, uptrend_only: bool = True):
@@ -257,6 +280,11 @@ def main(argv=None):
     tp.add_argument("-n", type=int, default=100)
     tp.add_argument("--market", choices=["US", "ID", "us", "id"])
     tp.add_argument("--uptrend", action="store_true", help="only stocks above their 200-day average")
+    ch = sub.add_parser("choices", help="every stock: buyable or not, and why")
+    ch.add_argument("--market", choices=["US", "ID", "us", "id"])
+    ch.add_argument("--buyable", action="store_true", help="hide stocks that fail a rule")
+    wy = sub.add_parser("why", help="why is a stock (not) on the buy list?")
+    wy.add_argument("symbols", nargs="+")
     rn = sub.add_parser("run")
     rn.add_argument("--no-brief", action="store_true")
     a = p.parse_args(argv)
@@ -315,6 +343,16 @@ def main(argv=None):
         with console.status("Scanning…"):
             sig = scan()
         _show_swing(sig, a.all)
+    elif a.cmd == "choices":
+        _show_choices(a.market, a.buyable)
+    elif a.cmd == "why":
+        from .screen import choices, explain
+        df = choices()
+        for sym in a.symbols:
+            sym = sym.upper()
+            if sym not in set(df["symbol"]) and f"{sym}.JK" in set(df["symbol"]):
+                sym = f"{sym}.JK"          # allow `why BBCA`
+            console.print("\n".join(explain(sym, df)) + "\n")
     elif a.cmd == "top":
         _show_top(a.n, a.market, a.uptrend)
     elif a.cmd == "show":
